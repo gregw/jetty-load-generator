@@ -45,6 +45,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  *
@@ -81,8 +83,6 @@ public class LoadGenerator
 
     private Transport transport;
 
-    private HttpClientTransport httpClientTransport;
-
     private SslContextFactory sslContextFactory;
 
     private List<Request.Listener> requestListeners;
@@ -97,16 +97,15 @@ public class LoadGenerator
 
     private SocketAddressResolver socketAddressResolver;
 
-    private CollectorServer collectorServer;
-
     private List<LatencyListener> latencyListeners;
 
     private List<ResponseTimeListener> responseTimeListeners;
 
     private LoadGeneratorResultHandler _loadGeneratorResultHandler;
 
-    private List<HttpProxy> httpProxies;
+    private List<HttpProxy> httpProxies = new ArrayList<>(  );
 
+    private HttpClientTransportSupplier<HttpClientTransport> httpClientTransportSupplier;
 
     public enum Transport
     {
@@ -159,11 +158,6 @@ public class LoadGenerator
     public Transport getTransport()
     {
         return transport;
-    }
-
-    public HttpClientTransport getHttpClientTransport()
-    {
-        return httpClientTransport;
     }
 
     public SslContextFactory getSslContextFactory()
@@ -265,10 +259,6 @@ public class LoadGenerator
                     responseTimeListener.onLoadGeneratorStop();
                 }
             }
-            if ( collectorServer != null )
-            {
-                collectorServer.stop();
-            }
             for ( HttpClient httpClient : this.clients )
             {
                 httpClient.stop();
@@ -295,9 +285,7 @@ public class LoadGenerator
 
         executorService.submit( () ->
             {
-                HttpClientTransport httpClientTransport =
-                    getHttpClientTransport() != null ?//
-                        getHttpClientTransport() : provideClientTransport( getTransport() );
+                HttpClientTransport httpClientTransport = httpClientTransportSupplier.get();
 
                 for ( int i = getUsers(); i > 0; i-- )
                 {
@@ -305,7 +293,7 @@ public class LoadGenerator
                     {
                         HttpClient httpClient = newHttpClient( httpClientTransport, getSslContextFactory() );
                         // TODO dynamic depending on the rate??
-                        httpClient.setMaxRequestsQueuedPerDestination( 2048 );
+                        //httpClient.setMaxRequestsQueuedPerDestination( 2048 );
                         httpClient.setSocketAddressResolver( getSocketAddressResolver() );
                         httpClient.getRequestListeners().addAll( listeners );
                         if (this.httpProxies != null) {
@@ -380,42 +368,16 @@ public class LoadGenerator
 
         }
 
-        // FIXME weird circularity
-        transport.setHttpClient( httpClient );
-        httpClient.start();
-
         if ( this.getScheduler() != null )
         {
             httpClient.setScheduler( this.getScheduler() );
         }
 
-        return httpClient;
-    }
+        // FIXME weird circularity
+        transport.setHttpClient( httpClient );
+        httpClient.start();
 
-    protected HttpClientTransport provideClientTransport( Transport transport )
-    {
-        switch ( transport )
-        {
-            case HTTP:
-            case HTTPS:
-            {
-                return new HttpClientTransportOverHTTP( getSelectors() );
-            }
-            case H2C:
-            case H2:
-            {
-                HTTP2Client http2Client = newHTTP2Client();
-                return new HttpClientTransportOverHTTP2( http2Client );
-            }
-            case FCGI:
-            {
-                return new HttpClientTransportOverFCGI( selectors, false, "");
-            }
-            default:
-            {
-                throw new IllegalArgumentException();
-            }
-        }
+        return httpClient;
     }
 
     static String scheme( LoadGenerator.Transport transport)
@@ -436,13 +398,6 @@ public class LoadGenerator
     }
 
 
-    protected HTTP2Client newHTTP2Client()
-    {
-        HTTP2Client http2Client = new HTTP2Client();
-        http2Client.setSelectors( getSelectors() );
-        return http2Client;
-    }
-
     //--------------------------------------------------------------
     //  Builder
     //--------------------------------------------------------------
@@ -459,8 +414,6 @@ public class LoadGenerator
         private int port;
 
         private Transport transport;
-
-        private HttpClientTransport httpClientTransport;
 
         private SslContextFactory sslContextFactory;
 
@@ -479,6 +432,8 @@ public class LoadGenerator
         private List<ResponseTimeListener> responseTimeListeners;
 
         private List<HttpProxy> httpProxies;
+
+        private HttpClientTransportSupplier<HttpClientTransport> httpClientTransportSupplier;
 
         public Builder()
         {
@@ -516,12 +471,6 @@ public class LoadGenerator
         public Builder transport( Transport transport )
         {
             this.transport = transport;
-            return this;
-        }
-
-        public Builder httpClientTransport( HttpClientTransport httpClientTransport )
-        {
-            this.httpClientTransport = httpClientTransport;
             return this;
         }
 
@@ -579,6 +528,11 @@ public class LoadGenerator
             return this;
         }
 
+        public Builder httppClientTransportSupplier (HttpClientTransportSupplier<HttpClientTransport> httpClientTransportSupplier) {
+            this.httpClientTransportSupplier = httpClientTransportSupplier;
+            return this;
+        }
+
         public LoadGenerator build()
         {
             this.validate();
@@ -587,7 +541,6 @@ public class LoadGenerator
             loadGenerator.transport = this.transport;
             loadGenerator.requestListeners = this.requestListeners == null ? new ArrayList<>() // //
                 : this.requestListeners;
-            loadGenerator.httpClientTransport = httpClientTransport;
             loadGenerator.sslContextFactory = sslContextFactory;
             loadGenerator.selectors = selectors;
             loadGenerator.scheduler = httpScheduler;
@@ -596,6 +549,7 @@ public class LoadGenerator
             loadGenerator.latencyListeners = latencyListeners;
             loadGenerator.responseTimeListeners = responseTimeListeners;
             loadGenerator.httpProxies = httpProxies;
+            loadGenerator.httpClientTransportSupplier = httpClientTransportSupplier;
             return loadGenerator.start();
         }
 

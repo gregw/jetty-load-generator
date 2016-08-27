@@ -21,6 +21,7 @@ package org.eclipse.jetty.load.generator;
 
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
 import org.eclipse.jetty.client.HttpClient;
+import org.eclipse.jetty.client.HttpClientTransport;
 import org.eclipse.jetty.client.api.ContentResponse;
 import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.fcgi.server.ServerFCGIConnectionFactory;
@@ -71,6 +72,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 
 @RunWith( Parameterized.class )
 public class LoadGeneratorTest
@@ -156,37 +158,25 @@ public class LoadGeneratorTest
         runProfile( loadGeneratorProfile );
 
     }
-
-    @Ignore
-    public void manual_test()
-        throws Exception
-    {
-
-        LoadGeneratorProfile profile = new LoadGeneratorProfile.Builder() //
-            .resource( "/" ).size( 1024 ) //
-            .build();
-
-        Scheduler scheduler = new ScheduledExecutorScheduler( getClass().getName() + "-scheduler", false );
-
-        LoadGenerator loadGenerator = new LoadGenerator.Builder() //
-            .host( "www.strava.comm" ) //
-            .port( 80 ) //
-            .users( this.usersNumber ) //
-            .requestRate( 2 ) //
-            .transport( this.transport ) //
-            .scheduler( scheduler ) //
-            .loadProfile( profile ) //
-            .latencyListeners( new LatencyDisplayListener(), new SummaryLatencyListener() ) //
-            .responseTimeListeners( new ResponseTimeDisplayListener(), new SummaryResponseTimeListener() ) //
-            .build();
-
-        loadGenerator.run( 10, TimeUnit.SECONDS );
-
-    }
-
     protected void runProfile( LoadGeneratorProfile profile )
         throws Exception
     {
+
+        HttpClientTransportSupplier<HttpClientTransport> supplier = () -> {
+            switch ( transport ) {
+                case HTTP:
+                    return HttpClientTransportSupplier.http( 1 );
+                case HTTPS:
+                    return HttpClientTransportSupplier.https( 1 );
+                case H2:
+                case H2C:
+                    return HttpClientTransportSupplier.http2( 1 );
+                case FCGI:
+                    return HttpClientTransportSupplier.fcgi( 1 );
+                default:
+                    throw new IllegalArgumentException( "unknow protocol" );
+            }
+        };
 
         CollectorServer collectorServer = new CollectorServer( 0 ).start();
 
@@ -208,6 +198,7 @@ public class LoadGeneratorTest
             .latencyListeners( new LatencyDisplayListener(), new SummaryLatencyListener(), collectorServer ) //
             .responseTimeListeners( new ResponseTimeDisplayListener(), new SummaryResponseTimeListener(), collectorServer ) //
             .requestListeners( testRequestListener ) //
+            .httppClientTransportSupplier( supplier ) //
             .build();
 
         loadGenerator.run();

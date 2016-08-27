@@ -18,8 +18,10 @@
 
 package org.eclipse.jetty.load.collector;
 
+import org.eclipse.jetty.client.HttpClientTransport;
 import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.load.generator.CollectorServer;
+import org.eclipse.jetty.load.generator.HttpClientTransportSupplier;
 import org.eclipse.jetty.load.generator.LoadGenerator;
 import org.eclipse.jetty.load.generator.LoadGeneratorProfile;
 import org.eclipse.jetty.server.Handler;
@@ -113,6 +115,10 @@ public class CollectorTest
         throws Exception
     {
 
+        HttpClientTransportSupplier<HttpClientTransport> supplier = () -> {
+                    return HttpClientTransportSupplier.http( 1 );
+        };
+
         List<LoadGenerator> loadGenerators = new ArrayList<>( serverNumbers );
         List<CollectorClient> collectorClients = new ArrayList<>( serverNumbers );
         List<TestRequestListener> testRequestListeners = new ArrayList<>( serverNumbers );
@@ -140,6 +146,7 @@ public class CollectorTest
                 .latencyListeners( collectorServer ) //
                 .responseTimeListeners( collectorServer ) //
                 .requestListeners( testRequestListener ) //
+                .httppClientTransportSupplier( supplier ) //
                 .build();
 
             loadGenerator.run();
